@@ -9,7 +9,6 @@ from pytorch_lightning.callbacks import LearningRateMonitor, ModelCheckpoint
 from moltrans.data import BMSDataset, BMSDataModule
 
 
-IMG_SIZE = (256, 256)
 RANDOM_SEED = 42069
 VAL_SPLIT = 0.05
 CHEM_TOKEN_START = 26
@@ -30,9 +29,14 @@ DEFAULT_NUM_LAYERS = 6
 DEFAULT_SCHEDULE = "cycle"
 DEFAULT_LR = 0.001
 
+IMG_SIZE = (256, 256)
+IMG_MEAN = 0.9871
+IMG_STD_DEV = 0.08968
+
 TRANSFORM = T.Compose([
     T.Resize(IMG_SIZE),
-    T.ToTensor()
+    T.ToTensor(),
+    T.Normalize(IMG_MEAN, IMG_STD_DEV)
 ])
 
 
