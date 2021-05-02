@@ -233,12 +233,12 @@ class BMSModel(pl.LightningModule):
 
     def validation_step(self, batch, batch_idx):
         model_output = self.forward(batch)
-        target_smiles = batch["target_string"]
+        target_inchis = batch["target_string"]
 
         loss = self._calc_loss(batch, model_output)
         token_acc = self._calc_token_acc(batch, model_output)
         mol_strs, log_lhs = self.sample_molecules(batch, sampling_alg=self.val_sampling_alg)
-        metrics = self.sampler.calc_sampling_metrics(mol_strs, target_smiles)
+        metrics = self.sampler.calc_sampling_metrics(mol_strs, target_inchis)
 
         mol_acc = torch.tensor(metrics["accuracy"], device=loss.device)
         invalid = torch.tensor(metrics["invalid"], device=loss.device)

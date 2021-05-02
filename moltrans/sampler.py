@@ -21,6 +21,7 @@ class DecodeSampler:
         self.end_token_id = self.tokeniser.vocab[self.tokeniser.end_token]
 
         self.bad_token_ll = -1e5
+        self.example_inchi = "InChI=1S/C8H10N4O2/c1-10-4-9-6-5(10)7(13)12(3)8(14)11(6)2/h4H,1-3H3"
 
         RDLogger.DisableLog("rdApp.*")
 
@@ -356,29 +357,33 @@ class DecodeSampler:
         return Levenshtein.distance(str1, str2)
 
     @staticmethod
-    def calc_sampling_metrics(sampled_inchis, target_inchis):
-        num_sampled = len(sampled_inchis)
-        num_target = len(target_inchis)
+    def calc_sampling_metrics(sampled_smiles, target_smiles):
+        num_sampled = len(sampled_smiles)
+        num_target = len(target_smiles)
         err_msg = f"The number of sampled and target molecules must be the same, got {num_sampled} and {num_target}"
         assert num_sampled == num_target, err_msg
 
-        data_type = type(sampled_inchis[0])
+        data_type = type(sampled_smiles[0])
         if data_type == str:
-            results = DecodeSampler._calc_greedy_metrics(sampled_inchis, target_inchis)
+            results = DecodeSampler._calc_greedy_metrics(sampled_smiles, target_smiles)
         elif data_type == list:
-            results = DecodeSampler._calc_beam_metrics(sampled_inchis, target_inchis)
+            results = DecodeSampler._calc_beam_metrics(sampled_smiles, target_smiles)
         else:
             raise TypeError(f"Elements of sampled_inchis must be either a str or a list, got {data_type}")
 
         return results
 
     @staticmethod
-    def _calc_greedy_metrics(sampled_inchis, target_inchis):
-        sampled_mols = [Chem.inchi.MolFromInchi(inchi) for inchi in sampled_inchis]
+    def _calc_greedy_metrics(sampled_smiles, target_smiles):
+        sampled_mols = [Chem.inchi.MolFromInchi(smi) for smi in sampled_smiles]
         invalid = [mol is None for mol in sampled_mols]
+        sampled_inchis = [Chem.inchi.MolToInchi(mol) if mol is not None else self.example_inchi for mol in sampled_mols]
 
-        correct_inchis = [target_inchis[idx] == i for idx, i in enumerate(sampled_inchis)]
-        lev_dists = [DecodeSampler._lev_dist(inchi, target_inchis[idx]) for idx, inchi in enumerate(sampled_inchis)]
+        target_mols = [Chem.inchi.MolFromInchi(smi) for smi in target_smiles]
+        target_inchis = [Chem.inchi.MolToInchi(mol) for mol in target_mols]
+
+        correct_inchis = [target_inchis[idx] == inchi for idx, inchi in enumerate(sampled_inchis)]
+        lev_dists = [DecodeSampler._lev_dist(inchi, target_smiles[idx]) for idx, inchi in enumerate(sampled_inchis)]
 
         num_correct = sum(correct_inchis)
         total = len(correct_inchis)
@@ -396,9 +401,9 @@ class DecodeSampler:
         return metrics
 
     @staticmethod
-    def _calc_beam_metrics(sampled_inchis, target_inchis):
-        top_1_samples = [mols[0] for mols in sampled_inchis]
-        top_1_results = DecodeSampler._calc_greedy_metrics(top_1_samples, target_inchis)
+    def _calc_beam_metrics(sampled_smiles, target_smiles):
+        top_1_samples = [mols[0] for mols in sampled_smiles]
+        top_1_results = DecodeSampler._calc_greedy_metrics(top_1_samples, target_smiles)
 
         # TODO Search through list of beam outputs to find first valid inchi
 
