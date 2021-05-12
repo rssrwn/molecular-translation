@@ -1,6 +1,7 @@
 import os
 import torch
 import multiprocessing
+import numpy as np
 import pandas as pd
 import pytorch_lightning as pl
 from PIL import Image
@@ -12,14 +13,13 @@ from concurrent.futures import ProcessPoolExecutor
 
 
 class BMSDataset(Dataset):
-    def __init__(self, img_paths, inchis, transform=None, smiles=False):
+    def __init__(self, img_paths, inchis, transform=None):
         self.img_paths = img_paths
         self.inchis = inchis
         self.transform = transform
-        self.smiles = smiles
 
     @staticmethod
-    def from_data_path(data_path, transform=None, smiles=False):
+    def from_data_path(data_path, transform=None):
         path = Path(data_path)
         labels_df = pd.read_csv(path / "train_labels.csv")
         img_dict = BMSDataset._load_image_paths(path / "train")
@@ -27,21 +27,20 @@ class BMSDataset(Dataset):
         inchis = labels_df["InChI"].tolist()
         img_paths = [img_dict[img_id] for img_id in labels_df["image_id"].tolist()]
 
-        dataset = BMSDataset(img_paths, inchis, transform=transform, smiles=smiles)
+        dataset = BMSDataset(img_paths, inchis, transform=transform)
         return dataset
 
     def __len__(self):
         return len(self.inchis)
 
     def __getitem__(self, item):
-        mol_str = self.inchis[item]
-        if self.smiles:
-            mol_str = self._convert_to_smiles(mol_str)
+        inchi = self.inchis[item]
+        mol = Chem.inchi.MolFromInchi(inchi)
 
         img = self._load_img(self.img_paths[item])
         img = self.transform(img) if self.transform is not None else img
 
-        return img, mol_str
+        return img, mol
 
     @staticmethod
     def _load_image_paths(path):
@@ -71,11 +70,6 @@ class BMSDataset(Dataset):
         img = Image.open(path)
         return img
 
-    def _convert_to_smiles(self, inchi):
-        mol = Chem.inchi.MolFromInchi(inchi)
-        smiles = Chem.MolToSmiles(mol)
-        return smiles
-
 
 class BMSDataModule(pl.LightningDataModule):
     def __init__(
@@ -85,7 +79,8 @@ class BMSDataModule(pl.LightningDataModule):
         test_dataset,
         batch_size,
         tokeniser,
-        pin_memory=True
+        pin_memory=True,
+        aug_mols=True
     ):
         super().__init__()
 
@@ -96,6 +91,7 @@ class BMSDataModule(pl.LightningDataModule):
         self.batch_size = batch_size
         self.tokeniser = tokeniser
         self.pin_memory = pin_memory
+        self.aug_mols = aug_mols
         
         self._num_workers = len(os.sched_getaffinity(0))
 
@@ -131,7 +127,11 @@ class BMSDataModule(pl.LightningDataModule):
         return loader
 
     def _collate(self, batch, train=True):
-        imgs, mol_strs = tuple(zip(*batch))
+        imgs, mols = tuple(zip(*batch))
+        if self.aug_mols:
+            mols = [self._augment_mol(mol) for mol in mols]
+
+        mol_strs = [Chem.MolToSmiles(mol, canonical=False) for mol in mols]
         token_output = self.tokeniser.tokenise(mol_strs, pad=True)
         tokens = token_output["original_tokens"]
         pad_masks = token_output["original_pad_masks"]
@@ -150,3 +150,10 @@ class BMSDataModule(pl.LightningDataModule):
             "target_string": mol_strs
         }
         return collate_output
+
+    def _augment_mol(self, mol):
+        atom_order = list(range(mol.GetNumAtoms()))
+        np.random.shuffle(atom_order)
+        aug_mol = Chem.RenumberAtoms(mol, atom_order)
+        return aug_mol
+

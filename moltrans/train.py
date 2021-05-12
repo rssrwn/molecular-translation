@@ -55,18 +55,18 @@ def calc_train_steps(datam, epochs, acc_batches, gpus=1):
     return train_steps
 
 
-def split_dataset(dataset, split, train_transform=None, val_transform=None, smiles=False):
+def split_dataset(dataset, split, train_transform=None, val_transform=None):
     num_val = round(split * len(dataset))
 
     val_idxs = random.sample(range(len(dataset)), num_val)
     val_img_paths = [dataset.img_paths[idx] for idx in val_idxs]
     val_inchis = [dataset.inchis[idx] for idx in val_idxs]
-    val_dataset = BMSDataset(val_img_paths, val_inchis, transform=val_transform, smiles=smiles)
+    val_dataset = BMSDataset(val_img_paths, val_inchis, transform=val_transform)
 
     train_idxs = list(set(range(len(dataset))) - set(val_idxs))
     train_img_paths = [dataset.img_paths[idx] for idx in train_idxs]
     train_inchis = [dataset.inchis[idx] for idx in train_idxs]
-    train_dataset = BMSDataset(train_img_paths, train_inchis, transform=train_transform, smiles=smiles)
+    train_dataset = BMSDataset(train_img_paths, train_inchis, transform=train_transform)
 
     return train_dataset, val_dataset
 
@@ -130,8 +130,7 @@ def main(args):
         dataset,
         VAL_SPLIT,
         train_transform=TRANSFORM,
-        val_transform=TRANSFORM,
-        smiles=True
+        val_transform=TRANSFORM
     )
     print("Complete.")
 
