@@ -136,7 +136,7 @@ def main(args):
     trainer = build_trainer(args)
 
     # Fit training data
-    trainer.fit(model, dm)
+    trainer.fit(model, datamodule=dm)
 
 
 if __name__ == '__main__':

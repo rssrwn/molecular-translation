@@ -21,7 +21,6 @@ class DecodeSampler:
         self.end_token_id = self.tokeniser.vocab[self.tokeniser.end_token]
 
         self.bad_token_ll = -1e5
-        self.example_inchi = "InChI=1S/C8H10N4O2/c1-10-4-9-6-5(10)7(13)12(3)8(14)11(6)2/h4H,1-3H3"
 
         RDLogger.DisableLog("rdApp.*")
 
@@ -375,15 +374,17 @@ class DecodeSampler:
 
     @staticmethod
     def _calc_greedy_metrics(sampled_smiles, target_smiles):
-        sampled_mols = [Chem.inchi.MolFromInchi(smi) for smi in sampled_smiles]
-        invalid = [mol is None for mol in sampled_mols]
-        sampled_inchis = [Chem.inchi.MolToInchi(mol) if mol is not None else self.example_inchi for mol in sampled_mols]
+        example_inchi = "InChI=1S/C8H10N4O2/c1-10-4-9-6-5(10)7(13)12(3)8(14)11(6)2/h4H,1-3H3"
 
-        target_mols = [Chem.inchi.MolFromInchi(smi) for smi in target_smiles]
+        sampled_mols = [Chem.MolFromSmiles(smi) for smi in sampled_smiles]
+        invalid = [mol is None for mol in sampled_mols]
+        sampled_inchis = [Chem.inchi.MolToInchi(mol) if mol is not None else example_inchi for mol in sampled_mols]
+
+        target_mols = [Chem.MolFromSmiles(smi) for smi in target_smiles]
         target_inchis = [Chem.inchi.MolToInchi(mol) for mol in target_mols]
 
         correct_inchis = [target_inchis[idx] == inchi for idx, inchi in enumerate(sampled_inchis)]
-        lev_dists = [DecodeSampler._lev_dist(inchi, target_smiles[idx]) for idx, inchi in enumerate(sampled_inchis)]
+        lev_dists = [DecodeSampler._lev_dist(inchi, target_inchis[idx]) for idx, inchi in enumerate(sampled_inchis)]
 
         num_correct = sum(correct_inchis)
         total = len(correct_inchis)
