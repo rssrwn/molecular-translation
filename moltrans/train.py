@@ -1,4 +1,5 @@
 import math
+import torch
 import random
 import argparse
 import pytorch_lightning as pl
@@ -6,7 +7,10 @@ import torchvision.transforms as T
 from pytorch_lightning.loggers import TensorBoardLogger
 from pytorch_lightning.callbacks import LearningRateMonitor, ModelCheckpoint
 
+from moltrans.tokeniser import Tokeniser
+from moltrans.sampler import DecodeSampler
 from moltrans.data import BMSDataset, BMSDataModule
+from moltrans.model import BMSEncoder, BMSDecoder, BMSModel
 
 
 RANDOM_SEED = 42069
@@ -20,7 +24,7 @@ DEFAULT_VOCAB_PATH = "vocab.txt"
 DEFAULT_MAX_SEQ_LEN = 256
 DEFAULT_BATCH_SIZE = 128
 DEFAULT_EPOCHS = 1
-DEFAUlt_ACC_BATCHES = 1
+DEFAULT_ACC_BATCHES = 1
 DEFAULT_CLIP_GRAD = 1.0
 DEFAULT_D_MODEL = 512
 DEFAULT_D_FEEDFORWARD = 2048
@@ -110,13 +114,18 @@ def build_trainer(args):
 
 def main(args):
     # Load dataset
+    print("Loading dataset...")
     dataset = BMSDataset.from_data_path(args.data_path)
+    print("Dataset complete.")
 
     # Build tokeniser and sampler
+    print("Loading tokeniser and sampler...")
     tokeniser = Tokeniser.from_vocab_file(args.vocab_path, REGEX, CHEM_TOKEN_START)
     sampler = DecodeSampler(tokeniser, args.max_seq_len)
+    print("Complete.")
 
     # Split dataset randomly
+    print("Spliting dataset...")
     train_dataset, val_dataset = split_dataset(
         dataset,
         VAL_SPLIT,
@@ -124,19 +133,28 @@ def main(args):
         val_transform=TRANSFORM,
         smiles=True
     )
+    print("Complete.")
 
     # Build data module
+    print("Loading data module...")
     dm = BMSDataModule(train_dataset, val_dataset, None, args.batch_size, tokeniser)
+    print("Data module complete.")
 
     # Build model
+    print("Building model...")
     vocab_size = len(tokeniser)
     model = build_model(args, dm, sampler, vocab_size)
+    print("Complete.")
 
     # Build PL trainer
+    print("Building trainer...")
     trainer = build_trainer(args)
+    print("Complete.")
 
     # Fit training data
+    print("Fitting data module to model...")
     trainer.fit(model, datamodule=dm)
+    print("Training complete.")
 
 
 if __name__ == '__main__':
