@@ -7,6 +7,7 @@ import torchvision.transforms as T
 from pytorch_lightning.loggers import TensorBoardLogger
 from pytorch_lightning.callbacks import LearningRateMonitor, ModelCheckpoint
 
+import moltrans.util as util
 from moltrans.tokeniser import Tokeniser
 from moltrans.sampler import DecodeSampler
 from moltrans.data import BMSDataset, BMSDataModule
@@ -38,21 +39,11 @@ IMG_MEAN = 0.9871
 IMG_STD_DEV = 0.08968
 
 TRANSFORM = T.Compose([
+    util.Squarify(),
     T.Resize(IMG_SIZE),
     T.ToTensor(),
     T.Normalize(IMG_MEAN, IMG_STD_DEV)
 ])
-
-
-def set_seed():
-    pl.utilities.seed.seed_everything(RANDOM_SEED)
-
-
-def calc_train_steps(datam, epochs, acc_batches, gpus=1):
-    datam.setup()
-    batches_per_gpu = math.ceil(len(datam.train_dataloader()) / float(gpus))
-    train_steps = math.ceil(batches_per_gpu / acc_batches) * epochs
-    return train_steps
 
 
 def split_dataset(dataset, split, train_transform=None, val_transform=None):
@@ -72,7 +63,7 @@ def split_dataset(dataset, split, train_transform=None, val_transform=None):
 
 
 def build_model(args, dm, sampler, vocab_size):
-    train_steps = calc_train_steps(dm, args.epochs, args.acc_batches)
+    train_steps = util.calc_train_steps(dm, args.epochs, args.acc_batches)
     encoder = BMSEncoder(args.d_model)
     decoder = BMSDecoder(args.d_model, args.d_feedforward, args.num_layers, args.num_heads)
     model = BMSModel(
@@ -113,6 +104,8 @@ def build_trainer(args):
 
 
 def main(args):
+    util.set_seed(RANDOM_SEED)
+
     # Load dataset
     print("Loading dataset...")
     dataset = BMSDataset.from_data_path(args.data_path)
