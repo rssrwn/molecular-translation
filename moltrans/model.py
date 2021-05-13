@@ -124,7 +124,7 @@ class BMSModel(pl.LightningModule):
         max_seq_len,
         schedule,
         num_steps,
-        weight_decay=0.0,
+        weight_decay,
         pad_token_idx=0,
         dropout=0.1
     ):

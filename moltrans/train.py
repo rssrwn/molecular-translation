@@ -33,6 +33,7 @@ DEFAULT_NUM_HEADS = 8
 DEFAULT_NUM_LAYERS = 6
 DEFAULT_SCHEDULE = "cycle"
 DEFAULT_LR = 0.001
+DEFAULT_WEIGHT_DECAY = 0.0
 
 IMG_SIZE = (256, 256)
 IMG_MEAN = 0.9871
@@ -75,7 +76,8 @@ def build_model(args, dm, sampler, vocab_size):
         vocab_size,
         args.max_seq_len,
         args.schedule,
-        train_steps
+        train_steps,
+        args.weight_decay
     )
     return model
 
@@ -167,6 +169,7 @@ if __name__ == '__main__':
     parser.add_argument("--num_layers", type=int, default=DEFAULT_NUM_LAYERS)
     parser.add_argument("--schedule", type=str, default=DEFAULT_SCHEDULE)
     parser.add_argument("--lr", type=float, default=DEFAULT_LR)
+    parser.add_argument("--weight_decay", type=float, default=DEFAULT_WEIGHT_DECAY)
 
     parsed_args = parser.parse_args()
     main(parsed_args)
