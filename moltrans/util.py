@@ -1,4 +1,5 @@
 import math
+import random
 import pytorch_lightning as pl
 from PIL import ImageOps
 
@@ -10,6 +11,21 @@ class Squarify:
         new_size = (max(img.size), max(img.size))
         padded = ImageOps.pad(img, new_size, color="white")
         return padded
+
+
+class RandomPad:
+    """ Randomly pad each side of the image. """
+
+    def __init__(self, p, pad_range):
+        self.p = p
+        self.pad_range = pad_range
+
+    def __call__(self, img):
+        if random.random() < p:
+            border = random.randint(*self.pad_range)
+            img = ImageOps.expand(img, border=border, fill="white")
+
+        return img
 
 
 def set_seed(seed):
