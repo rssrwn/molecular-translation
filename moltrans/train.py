@@ -120,8 +120,8 @@ def main(args):
     train_dataset, val_dataset = split_dataset(
         dataset,
         VAL_SPLIT,
-        train_transform=util.TRANSFORM,
-        val_transform=util.TRANSFORM
+        train_transform=util.TRAIN_TRANSFORM,
+        val_transform=util.TEST_TRANSFORM
     )
     print("Complete.")
 
