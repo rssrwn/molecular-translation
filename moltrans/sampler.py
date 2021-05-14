@@ -396,13 +396,15 @@ class DecodeSampler:
         perc_invalid = num_invalid / total
         accuracy = num_correct / total
         avg_lev_dist = sum(lev_dists) / total
-        avg_lev_dist_valid = sum(lev_dists_valid) / len(lev_dists_valid)
+
+        # num_valid = len(lev_dist_valid)
+        # avg_lev_dist_valid = sum(lev_dists_valid) / num_valid if num_valid > 0 else float("inf")
 
         metrics = {
             "accuracy": accuracy,
             "invalid": perc_invalid,
             "lev_dist": avg_lev_dist,
-            "lev_dist_valid": avg_lev_dist_valid
+            # "lev_dist_valid": avg_lev_dist_valid
         }
 
         return metrics
