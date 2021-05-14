@@ -15,7 +15,7 @@ from moltrans.model import BMSEncoder, BMSDecoder, BMSModel
 
 
 RANDOM_SEED = 42069
-VAL_SPLIT = 0.05
+VAL_SPLIT = 0.02
 CHEM_TOKEN_START = 26
 LOG_DIR = "tb_logs"
 REGEX = "\[[^\]]+]|Br?|Cl?|N|O|S|P|F|I|b|c|n|o|s|p|\(|\)|\.|=|#|-|\+|\\\\|\/|:|~|@|\?|>|\*|\$|\%[0-9]{2}|[0-9]"
@@ -151,7 +151,7 @@ def main(args):
     print("Training complete.")
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     parser = argparse.ArgumentParser()
 
     parser.add_argument("--data_path", type=str)
