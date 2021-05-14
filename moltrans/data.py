@@ -52,8 +52,8 @@ class BMSDataset(Dataset):
                 futures = [executor.submit(BMSDataset._img_names, k) for k in j.iterdir()]
                 results = [future.result() for future in futures]
                 for result in results:
-                    for name, file in result:
-                        img_paths[name] = file
+                    for img_name, img_file in result:
+                        img_paths[img_name] = img_file
 
         return img_paths
 
@@ -69,6 +69,31 @@ class BMSDataset(Dataset):
     def _load_img(self, path):
         img = Image.open(path)
         return img
+
+
+class BMSTestDataset(BMSDataset):
+    def __init__(self, img_ids, img_paths, transform=None):
+        self.img_ids = img_ids
+        self.img_paths = img_paths
+        self.transform = transform
+
+    @staticmethod
+    def from_data_path(data_path, transform=None):
+        path = Path(data_path)
+        img_dict = BMSDataset._load_image_paths(path / "test")
+        img_ids = list(img_dict.keys())
+        img_paths = [img_dict[img_id] for img_id in img_ids]
+        dataset = BMSTestDataset(img_ids, img_paths, transform=transform)
+        return dataset
+
+    def __len__(self):
+        return len(self.img_ids)
+
+    def __getitem__(self, item):
+        img_id = self.img_ids[item]
+        img = self._load_img(self.img_paths[item])
+        img = self.transform(img) if self.transform is not None else img
+        return img_id, img
 
 
 class BMSDataModule(pl.LightningDataModule):
@@ -105,7 +130,7 @@ class BMSDataModule(pl.LightningDataModule):
             pin_memory=self.pin_memory
         )
         return loader
-    
+
     def val_dataloader(self):
         loader = DataLoader(
             self.val_dataset, 
@@ -115,7 +140,7 @@ class BMSDataModule(pl.LightningDataModule):
             pin_memory=self.pin_memory
         )
         return loader
-    
+
     def test_dataloader(self):
         loader = DataLoader(
             self.test_dataset, 
@@ -128,7 +153,7 @@ class BMSDataModule(pl.LightningDataModule):
 
     def _collate(self, batch, train=True):
         imgs, mols = tuple(zip(*batch))
-        if self.aug_mols:
+        if self.aug_mols and train:
             mols = [self._augment_mol(mol) for mol in mols]
 
         mol_strs = [Chem.MolToSmiles(mol, canonical=False) for mol in mols]
