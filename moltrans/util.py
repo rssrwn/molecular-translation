@@ -1,6 +1,8 @@
 import math
+import torch
 import random
 import pytorch_lightning as pl
+import torchvision.transforms as T
 from PIL import ImageOps
 
 
