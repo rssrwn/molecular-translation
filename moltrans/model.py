@@ -93,6 +93,59 @@ class BMSEncoder(nn.Module):
         return out
 
 
+class BMSHybridEncoder(nn.Module):
+    def __init__(
+        self,
+        d_model,
+        d_feedforward,
+        num_layers,
+        num_heads,
+        max_seq_len,
+        dropout=0.1,
+        activation="gelu"
+    ):
+        super().__init__()
+
+        self.d_model = d_model
+        self.d_feedforward = d_feedforward
+        self.num_layers = num_layers
+        self.num_heads = num_heads
+        self.max_seq_len = max_seq_len
+        self.resnet = ResNet()
+        self.fc = nn.Linear(self.resnet.out_dim, d_model)
+
+        enc_norm = nn.LayerNorm(d_model)
+        enc_layer = PreNormEncoderLayer(d_model, num_heads, d_feedforward, dropout, activation)
+        self.encoder = nn.TransformerEncoder(enc_layer, num_layers, norm=enc_norm)
+
+        self.dropout = nn.Dropout(dropout)
+        self.register_buffer("pos_emb", self._positional_embs())
+
+    def forward(self, imgs):
+        batch_size, _, _, _ = tuple(imgs.shape)
+        features = self.resnet(imgs)
+        features = features.reshape(batch_size, self.resnet.out_dim, -1).permute(2, 0, 1)
+        features = self.fc(features)
+        features = self._construct_enc_input(features)
+        out = self.encoder(features)
+        return out
+
+    def _construct_enc_input(self, features):
+        src_len, _, _ = tuple(features.shape)
+        pos_embs = self.pos_emb[:src_len, :].unsqueeze(0).transpose(0, 1)
+        feat = features + pos_embs
+        feat = self.dropout(feat)
+        return feat
+
+    def _positional_embs(self):
+        encs = torch.tensor([dim / self.d_model for dim in range(0, self.d_model, 2)])
+        encs = 10000 ** encs
+        encs = [(torch.sin(pos / encs), torch.cos(pos / encs)) for pos in range(self.max_seq_len)]
+        encs = [torch.stack(enc, dim=1).flatten()[:self.d_model] for enc in encs]
+        encs = torch.stack(encs)
+        return encs
+
+
 class BMSDecoder(nn.Module):
     def __init__(self, d_model, d_feedforward, num_layers, num_heads, dropout=0.1, activation="gelu"):
         super().__init__()
@@ -163,7 +216,7 @@ class BMSModel(pl.LightningModule):
         self.test_sampling_alg = "beam"
         self.num_beams = 5
 
-        self.memory_dropout = nn.Dropout(dropout)
+        # self.memory_dropout = nn.Dropout(dropout)
         self.emb = nn.Embedding(vocab_size, d_model, padding_idx=pad_token_idx)
         self.dropout = nn.Dropout(dropout)
         self.register_buffer("pos_emb", self._positional_embs())
@@ -173,7 +226,7 @@ class BMSModel(pl.LightningModule):
         self.log_softmax = nn.LogSoftmax(dim=2)
 
         self._init_params()
-        
+
     def forward(self, x):
         imgs = x["images"]
         decoder_input = x["decoder_input"]
@@ -188,7 +241,7 @@ class BMSModel(pl.LightningModule):
 
         token_output = self.token_fc(model_output)
         return token_output
-        
+
     def training_step(self, batch, batch_idx):
         model_output = self.forward(batch)
         loss = self._calc_loss(batch, model_output)
@@ -196,7 +249,7 @@ class BMSModel(pl.LightningModule):
         self.log("train_loss", loss, on_step=True, logger=True, sync_dist=True)
 
         return loss
-    
+
     def _calc_loss(self, batch_input, model_output):
         """ Calculate the loss for the model
 
@@ -299,7 +352,7 @@ class BMSModel(pl.LightningModule):
         if self.warm_up_steps is not None and step < self.warm_up_steps:
             return (self.lr / self.warm_up_steps) * step
         return self.lr
-    
+
     def sample_molecules(self, batch_input, sampling_alg="greedy"):
         self.freeze()
         imgs = batch_input["images"]
@@ -331,7 +384,7 @@ class BMSModel(pl.LightningModule):
         src_len, _, _ = tuple(memory.shape)
         pos_embs = self.pos_emb[:src_len, :].unsqueeze(0).transpose(0, 1)
         mem = memory + pos_embs
-        mem = self.memory_dropout(mem)
+        # mem = self.memory_dropout(mem)
         return mem
 
     def _construct_dec_input(self, token_ids):
