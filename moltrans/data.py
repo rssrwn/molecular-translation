@@ -117,7 +117,7 @@ class BMSDataModule(pl.LightningDataModule):
         self.tokeniser = tokeniser
         self.pin_memory = pin_memory
         self.aug_mols = aug_mols
-        
+
         self._num_workers = len(os.sched_getaffinity(0))
 
     def train_dataloader(self):

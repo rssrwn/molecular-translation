@@ -386,9 +386,9 @@ class DecodeSampler:
         correct_inchis = [target_inchis[idx] == inchi for idx, inchi in enumerate(sampled_inchis)]
         lev_dists = [DecodeSampler._lev_dist(inchi, target_inchis[idx]) for idx, inchi in enumerate(sampled_inchis)]
 
-        valid_sampled_inchis = [Chem.inchi.MolToInchi(mol) for mol in sampled_mols if mol is not None]
-        valid_target_inchis = [target_inchis[idx] for idx, inval in enumerate(invalid) if not inval]
-        lev_dists_valid = [DecodeSampler._lev_dist(*p) for p in zip(valid_sampled_inchis, valid_target_inchis)]
+        # valid_sampled_inchis = [Chem.inchi.MolToInchi(mol) for mol in sampled_mols if mol is not None]
+        # valid_target_inchis = [target_inchis[idx] for idx, inval in enumerate(invalid) if not inval]
+        # lev_dists_valid = [DecodeSampler._lev_dist(*p) for p in zip(valid_sampled_inchis, valid_target_inchis)]
 
         num_correct = sum(correct_inchis)
         total = len(correct_inchis)
