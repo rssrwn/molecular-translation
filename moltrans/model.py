@@ -209,7 +209,7 @@ class BMSModel(pl.LightningModule):
             "weight_decay",
             "pad_token_idx",
             "dropout",
-            **kwargs
+            *tuple(kwargs.keys())
         )
 
         self.val_sampling_alg = "greedy"

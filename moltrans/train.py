@@ -55,9 +55,8 @@ def split_dataset(dataset, split, train_transform=None, val_transform=None):
 
 def build_model(args, dm, sampler, vocab_size):
     extra_args = {
-        acc_batches: args.acc_batches
+        "acc_batches": args.acc_batches
     }
-
     train_steps = util.calc_train_steps(dm, args.epochs, args.acc_batches)
     encoder = BMSEncoder(args.d_model)
     decoder = BMSDecoder(args.d_model, args.d_feedforward, args.num_layers, args.num_heads)

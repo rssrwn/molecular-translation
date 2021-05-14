@@ -23,7 +23,7 @@ class RandomPad:
         self.pad_range = pad_range
 
     def __call__(self, img):
-        if random.random() < p:
+        if random.random() < self.p:
             border = random.randint(*self.pad_range)
             img = ImageOps.expand(img, border=border, fill="white")
 
@@ -36,7 +36,7 @@ use_gpu = USE_GPU and torch.cuda.is_available()
 IMG_SIZE = (256, 256)
 IMG_MEAN = 0.9871
 IMG_STD_DEV = 0.08968
-WHITE = (255, 255, 255)
+WHITE = 255
 
 PAD_PROB = 0.5
 PAD_RANGE = (10, 50)
@@ -46,6 +46,7 @@ TRAIN_TRANSFORM = T.Compose([
     Squarify(),
     T.Resize(IMG_SIZE),
     RandomPad(PAD_PROB, PAD_RANGE),
+    T.Resize(IMG_SIZE),
     T.RandomRotation(ROTATION_RANGE, fill=WHITE),
     T.ToTensor(),
     T.Normalize(IMG_MEAN, IMG_STD_DEV)
