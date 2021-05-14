@@ -31,20 +31,10 @@ DEFAULT_D_MODEL = 512
 DEFAULT_D_FEEDFORWARD = 2048
 DEFAULT_NUM_HEADS = 8
 DEFAULT_NUM_LAYERS = 6
-DEFAULT_SCHEDULE = "cycle"
+DEFAULT_SCHEDULE = "const"
 DEFAULT_LR = 0.001
 DEFAULT_WEIGHT_DECAY = 0.0
-
-IMG_SIZE = (256, 256)
-IMG_MEAN = 0.9871
-IMG_STD_DEV = 0.08968
-
-TRANSFORM = T.Compose([
-    util.Squarify(),
-    T.Resize(IMG_SIZE),
-    T.ToTensor(),
-    T.Normalize(IMG_MEAN, IMG_STD_DEV)
-])
+DEFAULT_WARM_UP_STEPS = 4000
 
 
 def split_dataset(dataset, split, train_transform=None, val_transform=None):
@@ -64,6 +54,10 @@ def split_dataset(dataset, split, train_transform=None, val_transform=None):
 
 
 def build_model(args, dm, sampler, vocab_size):
+    extra_args = {
+        acc_batches: args.acc_batches
+    }
+
     train_steps = util.calc_train_steps(dm, args.epochs, args.acc_batches)
     encoder = BMSEncoder(args.d_model)
     decoder = BMSDecoder(args.d_model, args.d_feedforward, args.num_layers, args.num_heads)
@@ -77,7 +71,9 @@ def build_model(args, dm, sampler, vocab_size):
         args.max_seq_len,
         args.schedule,
         train_steps,
-        args.weight_decay
+        args.weight_decay,
+        args.warm_up_steps,
+        **extra_args
     )
     return model
 
@@ -124,8 +120,8 @@ def main(args):
     train_dataset, val_dataset = split_dataset(
         dataset,
         VAL_SPLIT,
-        train_transform=TRANSFORM,
-        val_transform=TRANSFORM
+        train_transform=util.TRANSFORM,
+        val_transform=util.TRANSFORM
     )
     print("Complete.")
 
@@ -170,6 +166,7 @@ if __name__ == "__main__":
     parser.add_argument("--schedule", type=str, default=DEFAULT_SCHEDULE)
     parser.add_argument("--lr", type=float, default=DEFAULT_LR)
     parser.add_argument("--weight_decay", type=float, default=DEFAULT_WEIGHT_DECAY)
+    parser.add_argument("--warm_up_steps", type=int, default=DEFAULT_WARM_UP_STEPS)
 
     parsed_args = parser.parse_args()
     main(parsed_args)

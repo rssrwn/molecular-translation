@@ -125,8 +125,10 @@ class BMSModel(pl.LightningModule):
         schedule,
         num_steps,
         weight_decay,
+        warm_up_steps=None,
         pad_token_idx=0,
-        dropout=0.1
+        dropout=0.1,
+        **kwargs
     ):
         super().__init__()
 
@@ -140,6 +142,7 @@ class BMSModel(pl.LightningModule):
         self.schedule = schedule
         self.num_steps = num_steps
         self.weight_decay = weight_decay
+        self.warm_up_steps = warm_up_steps
         self.pad_token_idx = pad_token_idx
         self.dropout = dropout
 
@@ -152,7 +155,8 @@ class BMSModel(pl.LightningModule):
             "num_steps",
             "weight_decay",
             "pad_token_idx",
-            "dropout"
+            "dropout",
+            **kwargs
         )
 
         self.val_sampling_alg = "greedy"

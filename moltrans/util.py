@@ -28,6 +28,21 @@ class RandomPad:
         return img
 
 
+USE_GPU = True
+use_gpu = USE_GPU and torch.cuda.is_available()
+
+IMG_SIZE = (256, 256)
+IMG_MEAN = 0.9871
+IMG_STD_DEV = 0.08968
+
+TRANSFORM = T.Compose([
+    Squarify(),
+    T.Resize(IMG_SIZE),
+    T.ToTensor(),
+    T.Normalize(IMG_MEAN, IMG_STD_DEV)
+])
+
+
 def set_seed(seed):
     pl.utilities.seed.seed_everything(seed)
 
