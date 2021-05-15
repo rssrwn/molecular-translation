@@ -4,10 +4,15 @@ from pathlib import Path
 from functools import partial
 
 import torch
+import torchvision
 import torch.nn as nn
 import pytorch_lightning as pl
-import torchvision.models as models
 from torch.optim.lr_scheduler import LambdaLR, OneCycleLR
+
+
+# ************************************************************************************************
+# ***************************************** Util Classes *****************************************
+# ************************************************************************************************
 
 
 class FuncLR(LambdaLR):
@@ -63,8 +68,11 @@ class ResNet(nn.Module):
     def __init__(self):
         super().__init__()
         self.out_dim = 512
-        self.resnet = models.resnet18()
-        self.resnet.conv1 = nn.Conv2d(1, 64, kernel_size=7, stride=2, padding=3, bias=False)
+
+        resnet = torchvision.models.resnet18()
+        resnet.avgpool = None
+        resnet.fc = None
+        self.resnet = resnet
 
     def forward(self, x):
         out = self.resnet.conv1(x)
@@ -78,19 +86,149 @@ class ResNet(nn.Module):
         return out
 
 
-# class BMSEncoder(nn.Module):
-#     def __init__(self, d_model):
-#         super().__init__()
-#         self.d_model = d_model
-#         self.resnet = ResNet()
-#         self.fc = nn.Linear(self.resnet.out_dim, d_model)
+class _AbsTransformerModel(pl.LightningModule):
+    def __init__(
+        self,
+        d_model,
+        lr,
+        vocab_size,
+        max_seq_len,
+        schedule,
+        num_steps,
+        weight_decay,
+        warm_up_steps=None,
+        pad_token_idx=0,
+        dropout=0.1
+        **kwargs
+    ):
+        super().__init__()
 
-#     def forward(self, imgs):
-#         batch_size, _, _, _ = tuple(imgs.shape)
-#         out = self.resnet(imgs)
-#         out = out.reshape(batch_size, self.resnet.out_dim, -1).permute(2, 0, 1)
-#         out = self.fc(out)
-#         return out
+        self.d_model = d_model
+        self.lr = lr
+        self.vocab_size = vocab_size
+        self.max_seq_len = max_seq_len
+        self.schedule = schedule
+        self.num_steps = num_steps
+        self.weight_decay = weight_decay
+        self.warm_up_steps = warm_up_steps
+        self.pad_token_idx = pad_token_idx
+        self.dropout = dropout
+
+        if self.schedule == "transformer":
+            assert warm_up_steps is not None, "A value for warm_up_steps is required for transformer LR schedule"
+
+        # Additional args passed in to **kwargs in init will also be saved
+        self.save_hyperparameters()
+
+        self.dropout = nn.Dropout(dropout)
+        self.register_buffer("pos_emb", self._positional_embs())
+
+    def forward(self, x):
+        raise NotImplementedError()
+
+    def _calc_loss(self, batch_input, model_output):
+        raise NotImplementedError()
+
+    def training_step(self, batch, batch_idx):
+        self.train()
+
+        model_output = self.forward(batch)
+        loss = self._calc_loss(batch, model_output)
+
+        self.log("train_loss", loss, on_step=True, logger=True, sync_dist=True)
+
+        return loss
+
+    def validation_step(self, batch, batch_idx):
+        self.eval()
+
+        model_output = self.forward(batch)
+        loss = self._calc_loss(batch, model_output)
+
+        val_outputs = {"val_loss": loss}
+        return val_outputs
+
+    def validation_epoch_end(self, outputs):
+        avg_outputs = self._avg_dicts(outputs)
+        self._log_dict(avg_outputs)
+
+    def configure_optimizers(self):
+        params = self.parameters()
+        optim = torch.optim.Adam(params, lr=self.lr, weight_decay=self.weight_decay, betas=(0.9, 0.999))
+
+        if self.schedule == "const":
+            print("Using constant LR schedule.")
+            const_sch = FuncLR(optim, lr_lambda=self._const_lr)
+            sch = {"scheduler": const_sch, "interval": "step"}
+
+        elif self.schedule == "cycle":
+            print("Using cyclical LR schedule.")
+            cycle_sch = OneCycleLR(optim, self.lr, total_steps=self.num_steps)
+            sch = {"scheduler": cycle_sch, "interval": "step"}
+
+        elif self.schedule == "transformer":
+            print("Using original transformer schedule.")
+            trans_sch = FuncLR(optim, lr_lambda=self._transformer_lr)
+            sch = {"scheduler": trans_sch, "interval": "step"}
+
+        else:
+            raise ValueError(f"Unknown schedule {self.schedule}")
+
+        return [optim], [sch]
+
+    def _transformer_lr(self, step):
+        mult = self.d_model ** -0.5
+        step = 1 if step == 0 else step  # Stop div by zero errors
+        lr = min(step ** -0.5, step * (self.warm_up_steps ** -1.5))
+        return self.lr * mult * lr
+
+    def _const_lr(self, step):
+        if self.warm_up_steps is not None and step < self.warm_up_steps:
+            return (self.lr / self.warm_up_steps) * step
+
+        return self.lr
+
+    def _add_pos_embs(self, seq):
+        seq_len, _ = tuple(seq.size())
+        positional_embs = self.pos_emb[:seq_len, :].unsqueeze(0).transpose(0, 1)
+        embs = seq + positional_embs
+        embs = self.dropout(embs)
+        return embs
+
+    def _positional_embs(self):
+        encs = torch.tensor([dim / self.d_model for dim in range(0, self.d_model, 2)])
+        encs = 10000 ** encs
+        encs = [(torch.sin(pos / encs), torch.cos(pos / encs)) for pos in range(self.max_seq_len)]
+        encs = [torch.stack(enc, dim=1).flatten()[:self.d_model] for enc in encs]
+        encs = torch.stack(encs)
+        return encs
+
+    def _generate_square_subsequent_mask(self, sz, device="cpu"):
+        mask = (torch.triu(torch.ones((sz, sz), device=device)) == 1).transpose(0, 1)
+        mask = mask.float().masked_fill(mask == 0, float('-inf')).masked_fill(mask == 1, float(0.0))
+        return mask
+
+    def _init_params(self):
+        for p in self.parameters():
+            if p.dim() > 1:
+                nn.init.xavier_uniform_(p)
+
+    def _avg_dicts(self, colls):
+        complete_dict = {key: [] for key, val in colls[0].items()}
+        for coll in colls:
+            [complete_dict[key].append(coll[key]) for key in complete_dict.keys()]
+
+        avg_dict = {key: sum(l) / len(l) for key, l in complete_dict.items()}
+        return avg_dict
+
+    def _log_dict(self, coll):
+        for key, val in coll.items():
+            self.log(key, val, sync_dist=True)
+
+
+# ************************************************************************************************
+# ******************************************* Encoders *******************************************
+# ************************************************************************************************
 
 
 class BMSEncoder(nn.Module):
@@ -146,6 +284,11 @@ class BMSEncoder(nn.Module):
         return encs
 
 
+# ************************************************************************************************
+# ******************************************* Decoders *******************************************
+# ************************************************************************************************
+
+
 class BMSDecoder(nn.Module):
     def __init__(self, d_model, d_feedforward, num_layers, num_heads, dropout=0.1, activation="gelu"):
         super().__init__()
@@ -163,6 +306,11 @@ class BMSDecoder(nn.Module):
         mask = (torch.triu(torch.ones((sz, sz), device=device)) == 1).transpose(0, 1)
         mask = mask.float().masked_fill(mask == 0, float('-inf')).masked_fill(mask == 1, float(0.0))
         return mask
+
+
+# ***********************************************************************************************
+# ****************************************** BMS Model ******************************************
+# ***********************************************************************************************
 
 
 class BMSModel(pl.LightningModule):
@@ -216,7 +364,6 @@ class BMSModel(pl.LightningModule):
         self.test_sampling_alg = "beam"
         self.num_beams = 5
 
-        # self.memory_dropout = nn.Dropout(dropout)
         self.emb = nn.Embedding(vocab_size, d_model, padding_idx=pad_token_idx)
         self.dropout = nn.Dropout(dropout)
         self.register_buffer("pos_emb", self._positional_embs())
@@ -232,10 +379,7 @@ class BMSModel(pl.LightningModule):
         decoder_input = x["decoder_input"]
         decoder_pad_mask = x["decoder_pad_mask"].transpose(0 ,1)
 
-        # Encode images and add positional embeddings
         memory = self.encoder(imgs)
-        # memory = self._construct_memory_input(memory)
-
         decoder_embs = self._construct_dec_input(decoder_input)
         model_output = self.decoder(decoder_embs, decoder_pad_mask, memory)
 
@@ -357,7 +501,6 @@ class BMSModel(pl.LightningModule):
         self.freeze()
         imgs = batch_input["images"]
         memory = self.encoder(imgs)
-        # memory = self._construct_memory_input(memory)
 
         _, batch_size, _ = tuple(memory.size())
         decode_fn = partial(self._decode_fn, memory=memory)
@@ -379,13 +522,6 @@ class BMSModel(pl.LightningModule):
         token_output = self.token_fc(output)
         token_probs = self.log_softmax(token_output)
         return token_probs
-
-    # def _construct_memory_input(self, memory):
-    #     src_len, _, _ = tuple(memory.shape)
-    #     pos_embs = self.pos_emb[:src_len, :].unsqueeze(0).transpose(0, 1)
-    #     mem = memory + pos_embs
-    #     # mem = self.memory_dropout(mem)
-    #     return mem
 
     def _construct_dec_input(self, token_ids):
         seq_len, _ = tuple(token_ids.size())

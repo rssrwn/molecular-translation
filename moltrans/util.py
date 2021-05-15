@@ -7,7 +7,7 @@ from PIL import ImageOps
 
 
 class Squarify:
-    """ Pad shortest dimension of image to be same as longest. """
+    """ Pad shortest dimension of image to be same as longest. Only for PIL images. """
 
     def __call__(self, img):
         new_size = (max(img.size), max(img.size))
@@ -15,8 +15,23 @@ class Squarify:
         return padded
 
 
+class BlurExtraChannels:
+    """ Create two additional image channels by blurring. Only for Tensors """
+
+    def __init__(self, sigma_1, simga_2):
+        kernel_size = 7
+        self.blur_1 = T.GaussianBlur(kernel_size, sigma=sigma_1)
+        self.blur_2 = T.GaussianBlur(kernel_size, sigma=sigma_2)
+
+    def __call__(self, img):
+        blur_1 = self.blur_1(img)
+        blur_2 = self.blur_2(img)
+        concat_img = torch.stack((img, blur_1, blur_2)).transpose(0, 1).unsqueeze(2)
+        return concat_img
+
+
 class RandomPad:
-    """ Randomly pad each side of the image. """
+    """ Randomly pad each side of the image. Only for PIL images. """
 
     def __init__(self, p, pad_range):
         self.p = p
