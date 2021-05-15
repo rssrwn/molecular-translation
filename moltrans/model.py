@@ -78,22 +78,22 @@ class ResNet(nn.Module):
         return out
 
 
+# class BMSEncoder(nn.Module):
+#     def __init__(self, d_model):
+#         super().__init__()
+#         self.d_model = d_model
+#         self.resnet = ResNet()
+#         self.fc = nn.Linear(self.resnet.out_dim, d_model)
+
+#     def forward(self, imgs):
+#         batch_size, _, _, _ = tuple(imgs.shape)
+#         out = self.resnet(imgs)
+#         out = out.reshape(batch_size, self.resnet.out_dim, -1).permute(2, 0, 1)
+#         out = self.fc(out)
+#         return out
+
+
 class BMSEncoder(nn.Module):
-    def __init__(self, d_model):
-        super().__init__()
-        self.d_model = d_model
-        self.resnet = ResNet()
-        self.fc = nn.Linear(self.resnet.out_dim, d_model)
-
-    def forward(self, imgs):
-        batch_size, _, _, _ = tuple(imgs.shape)
-        out = self.resnet(imgs)
-        out = out.reshape(batch_size, self.resnet.out_dim, -1).permute(2, 0, 1)
-        out = self.fc(out)
-        return out
-
-
-class BMSHybridEncoder(nn.Module):
     def __init__(
         self,
         d_model,
@@ -234,7 +234,7 @@ class BMSModel(pl.LightningModule):
 
         # Encode images and add positional embeddings
         memory = self.encoder(imgs)
-        memory = self._construct_memory_input(memory)
+        # memory = self._construct_memory_input(memory)
 
         decoder_embs = self._construct_dec_input(decoder_input)
         model_output = self.decoder(decoder_embs, decoder_pad_mask, memory)
@@ -357,7 +357,7 @@ class BMSModel(pl.LightningModule):
         self.freeze()
         imgs = batch_input["images"]
         memory = self.encoder(imgs)
-        memory = self._construct_memory_input(memory)
+        # memory = self._construct_memory_input(memory)
 
         _, batch_size, _ = tuple(memory.size())
         decode_fn = partial(self._decode_fn, memory=memory)
@@ -380,12 +380,12 @@ class BMSModel(pl.LightningModule):
         token_probs = self.log_softmax(token_output)
         return token_probs
 
-    def _construct_memory_input(self, memory):
-        src_len, _, _ = tuple(memory.shape)
-        pos_embs = self.pos_emb[:src_len, :].unsqueeze(0).transpose(0, 1)
-        mem = memory + pos_embs
-        # mem = self.memory_dropout(mem)
-        return mem
+    # def _construct_memory_input(self, memory):
+    #     src_len, _, _ = tuple(memory.shape)
+    #     pos_embs = self.pos_emb[:src_len, :].unsqueeze(0).transpose(0, 1)
+    #     mem = memory + pos_embs
+    #     # mem = self.memory_dropout(mem)
+    #     return mem
 
     def _construct_dec_input(self, token_ids):
         seq_len, _ = tuple(token_ids.size())

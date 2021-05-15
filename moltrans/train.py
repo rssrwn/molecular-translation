@@ -58,7 +58,7 @@ def build_model(args, dm, sampler, vocab_size):
         "acc_batches": args.acc_batches
     }
     train_steps = util.calc_train_steps(dm, args.epochs, args.acc_batches)
-    encoder = BMSEncoder(args.d_model)
+    encoder = BMSEncoder(args.d_model, args.d_feedforward, args.num_layers, args.num_heads, args.max_seq_len)
     decoder = BMSDecoder(args.d_model, args.d_feedforward, args.num_layers, args.num_heads)
     model = BMSModel(
         encoder,

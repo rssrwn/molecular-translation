@@ -45,9 +45,9 @@ ROTATION_RANGE = (-180, 180)
 TRAIN_TRANSFORM = T.Compose([
     Squarify(),
     T.Resize(IMG_SIZE),
-    RandomPad(PAD_PROB, PAD_RANGE),
-    T.Resize(IMG_SIZE),
-    T.RandomRotation(ROTATION_RANGE, fill=WHITE),
+    # RandomPad(PAD_PROB, PAD_RANGE),
+    # T.Resize(IMG_SIZE),
+    # T.RandomRotation(ROTATION_RANGE, fill=WHITE),
     T.ToTensor(),
     T.Normalize(IMG_MEAN, IMG_STD_DEV)
 ])
