@@ -18,15 +18,15 @@ class Squarify:
 class BlurExtraChannels:
     """ Create two additional image channels by blurring. Only for Tensors """
 
-    def __init__(self, sigma_1, simga_2):
-        kernel_size = 7
+    def __init__(self, sigma_1, sigma_2):
+        kernel_size = 3
         self.blur_1 = T.GaussianBlur(kernel_size, sigma=sigma_1)
         self.blur_2 = T.GaussianBlur(kernel_size, sigma=sigma_2)
 
     def __call__(self, img):
         blur_1 = self.blur_1(img)
         blur_2 = self.blur_2(img)
-        concat_img = torch.stack((img, blur_1, blur_2)).transpose(0, 1).unsqueeze(2)
+        concat_img = torch.stack((img, blur_1, blur_2)).squeeze(1)
         return concat_img
 
 
@@ -64,7 +64,7 @@ TRAIN_TRANSFORM = T.Compose([
     Squarify(),
     T.Resize(IMG_SIZE),
     T.ToTensor(),
-    BlurExtraChannels(SIGMA_1, SIGMA_2)
+    BlurExtraChannels(SIGMA_1, SIGMA_2),
     T.Normalize(IMG_MEAN, IMG_STD_DEV)
 ])
 
@@ -72,6 +72,7 @@ TEST_TRANSFORM = T.Compose([
     Squarify(),
     T.Resize(IMG_SIZE),
     T.ToTensor(),
+    BlurExtraChannels(SIGMA_1, SIGMA_2),
     T.Normalize(IMG_MEAN, IMG_STD_DEV)
 ])
 

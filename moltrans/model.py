@@ -96,9 +96,9 @@ class _AbsTransformerModel(pl.LightningModule):
         num_steps,
         weight_decay,
         vocab_size="None",
-        warm_up_steps="None",
+        warm_up_steps=0,
         pad_token_idx=0,
-        dropout=0.1
+        dropout=0.1,
         **kwargs
     ):
         super().__init__()
@@ -183,13 +183,13 @@ class _AbsTransformerModel(pl.LightningModule):
         return self.lr * mult * lr
 
     def _const_lr(self, step):
-        if self.warm_up_steps != "None" and step < self.warm_up_steps:
+        if self.warm_up_steps is not None and step < self.warm_up_steps:
             return (self.lr / self.warm_up_steps) * step
 
         return self.lr
 
     def _add_pos_embs(self, seq):
-        seq_len, _ = tuple(seq.size())
+        seq_len, _, _ = tuple(seq.size())
         positional_embs = self.pos_emb[:seq_len, :].unsqueeze(0).transpose(0, 1)
         embs = seq + positional_embs
         embs = self.dropout(embs)
