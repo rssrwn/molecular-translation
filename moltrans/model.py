@@ -91,12 +91,12 @@ class _AbsTransformerModel(pl.LightningModule):
         self,
         d_model,
         lr,
-        vocab_size,
         max_seq_len,
         schedule,
         num_steps,
         weight_decay,
-        warm_up_steps=None,
+        vocab_size="None",
+        warm_up_steps="None",
         pad_token_idx=0,
         dropout=0.1
         **kwargs
@@ -105,11 +105,11 @@ class _AbsTransformerModel(pl.LightningModule):
 
         self.d_model = d_model
         self.lr = lr
-        self.vocab_size = vocab_size
         self.max_seq_len = max_seq_len
         self.schedule = schedule
         self.num_steps = num_steps
         self.weight_decay = weight_decay
+        self.vocab_size = vocab_size
         self.warm_up_steps = warm_up_steps
         self.pad_token_idx = pad_token_idx
         self.dropout = dropout
@@ -183,7 +183,7 @@ class _AbsTransformerModel(pl.LightningModule):
         return self.lr * mult * lr
 
     def _const_lr(self, step):
-        if self.warm_up_steps is not None and step < self.warm_up_steps:
+        if self.warm_up_steps != "None" and step < self.warm_up_steps:
             return (self.lr / self.warm_up_steps) * step
 
         return self.lr
@@ -284,6 +284,52 @@ class BMSEncoder(nn.Module):
         return encs
 
 
+class MoCoEncoder(_AbsTransformerModel):
+    def __init__(
+        self,
+        d_model,
+        d_feedforward,
+        num_layers,
+        num_heads,
+        lr,
+        max_seq_len,
+        schedule,
+        num_steps,
+        weight_decay,
+        warm_up_steps=None,
+        pad_token_idx=0,
+        dropout=0.1,
+        activation="gelu"
+    ):
+        super().__init__(
+            d_model,
+            lr,
+            max_seq_len,
+            schedule,
+            num_steps,
+            weight_decay,
+            warm_up_steps=warm_up_steps,
+            pad_token_idx=pad_token_idx,
+            dropout=dropout,
+            d_feedforward=d_feedforward,
+            num_layers=num_layers,
+            num_heads=num_heads,
+            activation=activation
+        )
+
+    def forward(self, imgs):
+        batch_size, _, _, _ = tuple(imgs.shape)
+        features = self.resnet(imgs)
+        features = features.reshape(batch_size, self.resnet.out_dim, -1).permute(2, 0, 1)
+        features = self.fc(features)
+        features = self._add_pos_embs(features)
+        out = self.encoder(features)
+        return out
+
+    def _calc_loss(self, batch_input, model_output):
+        pass
+
+
 # ************************************************************************************************
 # ******************************************* Decoders *******************************************
 # ************************************************************************************************
@@ -313,7 +359,7 @@ class BMSDecoder(nn.Module):
 # ***********************************************************************************************
 
 
-class BMSModel(pl.LightningModule):
+class BMSModel(_AbsTransformerModel):
     def __init__(
         self,
         encoder,
@@ -331,43 +377,28 @@ class BMSModel(pl.LightningModule):
         dropout=0.1,
         **kwargs
     ):
-        super().__init__()
+        super().__init__(
+            d_model,
+            lr,
+            max_seq_len,
+            schedule,
+            num_steps,
+            weight_decay,
+            vocab_size=vocab_size,
+            warm_up_steps=warm_up_steps,
+            pad_token_idx=pad_token_idx,
+            dropout=dropout,
+            **kwargs
+        )
 
         self.encoder = encoder
         self.decoder = decoder
-        self.d_model = d_model
         self.sampler = sampler
-        self.lr = lr
-        self.vocab_size = vocab_size
-        self.max_seq_len = max_seq_len
-        self.schedule = schedule
-        self.num_steps = num_steps
-        self.weight_decay = weight_decay
-        self.warm_up_steps = warm_up_steps
-        self.pad_token_idx = pad_token_idx
-        self.dropout = dropout
-
-        self.save_hyperparameters(
-            "d_model",
-            "lr",
-            "vocab_size",
-            "max_seq_len",
-            "schedule",
-            "num_steps",
-            "weight_decay",
-            "pad_token_idx",
-            "dropout",
-            *tuple(kwargs.keys())
-        )
 
         self.val_sampling_alg = "greedy"
-        self.test_sampling_alg = "beam"
         self.num_beams = 5
 
         self.emb = nn.Embedding(vocab_size, d_model, padding_idx=pad_token_idx)
-        self.dropout = nn.Dropout(dropout)
-        self.register_buffer("pos_emb", self._positional_embs())
-
         self.token_fc = nn.Linear(d_model, vocab_size)
         self.loss_fn = nn.CrossEntropyLoss(reduction="none", ignore_index=pad_token_idx)
         self.log_softmax = nn.LogSoftmax(dim=2)
@@ -385,14 +416,6 @@ class BMSModel(pl.LightningModule):
 
         token_output = self.token_fc(model_output)
         return token_output
-
-    def training_step(self, batch, batch_idx):
-        model_output = self.forward(batch)
-        loss = self._calc_loss(batch, model_output)
-
-        self.log("train_loss", loss, on_step=True, logger=True, sync_dist=True)
-
-        return loss
 
     def _calc_loss(self, batch_input, model_output):
         """ Calculate the loss for the model
@@ -458,45 +481,6 @@ class BMSModel(pl.LightningModule):
         }
         return val_outputs
 
-    def validation_epoch_end(self, outputs):
-        avg_outputs = self._avg_dicts(outputs)
-        self._log_dict(avg_outputs)
-
-    def configure_optimizers(self):
-        params = self.parameters()
-        optim = torch.optim.Adam(params, lr=self.lr, weight_decay=self.weight_decay, betas=(0.9, 0.999))
-
-        if self.schedule == "const":
-            print("Using constant LR schedule.")
-            const_sch = FuncLR(optim, lr_lambda=self._const_lr)
-            sch = {"scheduler": const_sch, "interval": "step"}
-
-        elif self.schedule == "cycle":
-            print("Using cyclical LR schedule.")
-            cycle_sch = OneCycleLR(optim, self.lr, total_steps=self.num_steps)
-            sch = {"scheduler": cycle_sch, "interval": "step"}
-
-        elif self.schedule == "transformer":
-            print("Using original transformer schedule.")
-            trans_sch = FuncLR(optim, lr_lambda=self._transformer_lr)
-            sch = {"scheduler": trans_sch, "interval": "step"}
-
-        else:
-            raise ValueError(f"Unknown schedule {self.schedule}")
-
-        return [optim], [sch]
-
-    def _transformer_lr(self, step):
-        mult = self.d_model ** -0.5
-        step = 1 if step == 0 else step  # Stop div by zero errors
-        lr = min(step ** -0.5, step * (self.warm_up_steps ** -1.5))
-        return self.lr * mult * lr
-
-    def _const_lr(self, step):
-        if self.warm_up_steps is not None and step < self.warm_up_steps:
-            return (self.lr / self.warm_up_steps) * step
-        return self.lr
-
     def sample_molecules(self, batch_input, sampling_alg="greedy"):
         self.freeze()
         imgs = batch_input["images"]
@@ -524,26 +508,9 @@ class BMSModel(pl.LightningModule):
         return token_probs
 
     def _construct_dec_input(self, token_ids):
-        seq_len, _ = tuple(token_ids.size())
-        token_embs = self.emb(token_ids)
-        token_embs = token_embs * math.sqrt(self.d_model)
-        positional_embs = self.pos_emb[:seq_len, :].unsqueeze(0).transpose(0, 1)
-        embs = token_embs + positional_embs
-        embs = self.dropout(embs)
+        token_embs = self.emb(token_ids) * math.sqrt(self.d_model)
+        embs = self._add_pos_embs(token_embs)
         return embs
-
-    def _positional_embs(self):
-        encs = torch.tensor([dim / self.d_model for dim in range(0, self.d_model, 2)])
-        encs = 10000 ** encs
-        encs = [(torch.sin(pos / encs), torch.cos(pos / encs)) for pos in range(self.max_seq_len)]
-        encs = [torch.stack(enc, dim=1).flatten()[:self.d_model] for enc in encs]
-        encs = torch.stack(encs)
-        return encs
-
-    def _init_params(self):
-        for p in self.parameters():
-            if p.dim() > 1:
-                nn.init.xavier_uniform_(p)
 
     def _calc_token_acc(self, batch_input, model_output):
         token_ids = batch_input["target"]
@@ -559,15 +526,3 @@ class BMSModel(pl.LightningModule):
 
         accuracy = num_correct / total
         return accuracy
-
-    def _avg_dicts(self, colls):
-        complete_dict = {key: [] for key, val in colls[0].items()}
-        for coll in colls:
-            [complete_dict[key].append(coll[key]) for key in complete_dict.keys()]
-
-        avg_dict = {key: sum(l) / len(l) for key, l in complete_dict.items()}
-        return avg_dict
-
-    def _log_dict(self, coll):
-        for key, val in coll.items():
-            self.log(key, val, sync_dist=True)
