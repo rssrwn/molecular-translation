@@ -357,12 +357,14 @@ class MoCoEncoder(_AbsTransformerModel):
         self.queue = nn.functional.normalize(self.queue, dim=0)
         self.register_buffer("queue_ptr", torch.zeros(1, dtype=torch.long))
 
-    def forward(self, imgs):
+        self.loss_fn = nn.CrossEntropyLoss()
+
+    def encode(self, imgs):
         return self.encoder_q(imgs)
 
     def training_step(self, batch, batch_idx):
-        output, target = self.contrastive_step(*batch)
-        loss = F.cross_entropy(output.float(), target.long())
+        output, target = self.forward(*batch)
+        loss = self.loss_fn(output.float(), target.long())
 
         acc1, acc5 = precision_at_k(output, target, top_k=(1, 5))
 
@@ -371,8 +373,8 @@ class MoCoEncoder(_AbsTransformerModel):
         return loss
 
     def validation_step(self, batch, batch_idx):
-        output, target = self.contrastive_step(*batch)
-        loss = F.cross_entropy(output.float(), target.long())
+        output, target = self.forward(*batch)
+        loss = self.loss_fn(output.float(), target.long())
 
         acc1, acc5 = precision_at_k(output, target, top_k=(1, 5))
 
@@ -387,7 +389,7 @@ class MoCoEncoder(_AbsTransformerModel):
         log = {"val_loss": val_loss, "val_acc1": val_acc1, "val_acc5": val_acc5}
         self.log_dict(log)
 
-    def contrastive_step(self, img_q, img_k):
+    def forward(self, img_q, img_k):
         """ Assumes we are training on single GPU
         Input:
             im_q: a batch of query images
@@ -470,6 +472,88 @@ class BMSDecoder(nn.Module):
         mask = (torch.triu(torch.ones((sz, sz), device=device)) == 1).transpose(0, 1)
         mask = mask.float().masked_fill(mask == 0, float('-inf')).masked_fill(mask == 1, float(0.0))
         return mask
+
+
+class BARTModel(_AbsTransformerModel):
+    def __init__(
+        self,
+        d_model,
+        d_feedforward,
+        num_layers,
+        num_heads,
+        lr,
+        max_seq_len,
+        schedule,
+        num_steps,
+        weight_decay,
+        warm_up_steps=None,
+        pad_token_idx=0,
+        dropout=0.1,
+        activation="gelu"
+    ):
+        super().__init__(
+            d_model,
+            lr,
+            max_seq_len,
+            schedule,
+            num_steps,
+            weight_decay,
+            vocab_size=vocab_size,
+            warm_up_steps=warm_up_steps,
+            pad_token_idx=pad_token_idx,
+            dropout=dropout,
+            d_feedforward=d_feedforward,
+            num_layers=num_layers,
+            num_heads=num_heads
+        )
+
+        enc_norm = nn.LayerNorm(d_model)
+        enc_layer = PreNormEncoderLayer(d_model, num_heads, d_feedforward, dropout, activation)
+        self.encoder = nn.TransformerEncoder(enc_layer, num_layers, norm=enc_norm)
+
+        self.decoder = BMSDecoder(d_model, d_feedforward, num_layers, num_heads, dropout, activation)
+
+        self.emb = nn.Embedding(vocab_size, d_model, padding_idx=pad_token_idx)
+        self.token_fc = nn.Linear(d_model, vocab_size)
+        self.loss_fn = nn.CrossEntropyLoss(reduction="none", ignore_index=pad_token_idx)
+        self.log_softmax = nn.LogSoftmax(dim=2)
+
+        self._init_params()
+
+    def forward(self, x):
+        encoder_input = x["encoder_input"]
+        decoder_input = x["decoder_input"]
+        encoder_pad_mask = x["encoder_pad_mask"].transpose(0, 1)
+        decoder_pad_mask = x["decoder_pad_mask"].transpose(0, 1)
+
+        encoder_embs = self._construct_input(encoder_input)
+        memory = self.encoder(encoder_embs, src_key_padding_mask=encoder_pad_mask)
+        model_output = self.decode(decoder_input, decoder_pad_mask, memory)
+        return model_output
+
+    def decode(self, dec_input, dec_pad_mask, memory):
+        decoder_embs = self._construct_input(decoder_input)
+        model_output = self.decoder(decoder_embs, decoder_pad_mask, memory)
+        token_output = self.token_fc(model_output)
+        return token_probs
+
+    def _calc_loss(self, batch_input, model_output):
+        target = batch_input["target"]
+        target_mask = batch_input["target_mask"]
+        seq_len, batch_size = tuple(target.size())
+
+        token_pred = model_output.reshape((seq_len * batch_size, -1)).float()
+        loss = self.loss_fn(token_pred, target.reshape(-1)).reshape((seq_len, batch_size))
+
+        inv_target_mask = ~(target_mask > 0)
+        num_tokens = inv_target_mask.sum()
+        loss = loss.sum() / num_tokens
+        return loss
+
+    def _construct_input(self, token_ids):
+        token_embs = self.emb(token_ids) * math.sqrt(self.d_model)
+        embs = self._add_pos_embs(token_embs)
+        return embs
 
 
 # ***********************************************************************************************
