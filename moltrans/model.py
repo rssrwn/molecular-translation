@@ -7,6 +7,7 @@ import torch
 import torchvision
 import torch.nn as nn
 import pytorch_lightning as pl
+from pl_bolts.metrics import precision_at_k, mean
 from torch.optim.lr_scheduler import LambdaLR, OneCycleLR
 
 
@@ -67,9 +68,9 @@ class PreNormDecoderLayer(nn.TransformerDecoderLayer):
 class ResNet(nn.Module):
     def __init__(self):
         super().__init__()
-        self.out_dim = 512
+        self.out_dim = 2048
 
-        resnet = torchvision.models.resnet18()
+        resnet = torchvision.models.resnext50_32x4d()
         resnet.avgpool = None
         resnet.fc = None
         self.resnet = resnet
@@ -299,7 +300,11 @@ class MoCoEncoder(_AbsTransformerModel):
         warm_up_steps=None,
         pad_token_idx=0,
         dropout=0.1,
-        activation="gelu"
+        activation="gelu",
+        feat_dim=128,
+        dict_size=4096,
+        momentum=0.999,
+        temp=0.07
     ):
         super().__init__(
             d_model,
@@ -314,20 +319,133 @@ class MoCoEncoder(_AbsTransformerModel):
             d_feedforward=d_feedforward,
             num_layers=num_layers,
             num_heads=num_heads,
-            activation=activation
+            activation=activation,
+            feat_dim=feat_dim,
+            dict_size=dict_size,
+            momentum=momentum,
+            temp=temp
         )
 
-    def forward(self, imgs):
-        batch_size, _, _, _ = tuple(imgs.shape)
-        features = self.resnet(imgs)
-        features = features.reshape(batch_size, self.resnet.out_dim, -1).permute(2, 0, 1)
-        features = self.fc(features)
-        features = self._add_pos_embs(features)
-        out = self.encoder(features)
-        return out
+        self.feat_dim = feat_dim
+        self.dict_size = dict_size
+        self.momentum = momentum
+        self.temp = temp
 
-    def _calc_loss(self, batch_input, model_output):
-        pass
+        self.encoder_q = BMSEncoder(d_model, d_feedforward, num_layers, num_heads, dropout, activation)
+        self.encoder_k = BMSEncoder(d_model, d_feedforward, num_layers, num_heads, dropout, activation)
+
+        self.enc_q_fc = nn.Sequential(
+            nn.AdaptiveAvgPool2d((1, 1)),
+            nn.Linear(d_model, d_model),
+            nn.ReLU(),
+            nn.Linear(d_model, feat_dim)
+        )
+        self.enc_k_fc = nn.Sequential(
+            nn.AdaptiveAvgPool2d((1, 1)),
+            nn.Linear(d_model, d_model),
+            nn.ReLU(),
+            nn.Linear(d_model, feat_dim)
+        )
+
+        # Set same params and no grad for key encoder
+        for param_q, param_k in zip(self.encoder_q.parameters(), self.encoder_k.parameters()):
+            param_k.data.copy_(param_q.data)
+            param_k.requires_grad = False
+
+        # Create the queue
+        self.register_buffer("queue", torch.randn(emb_dim, num_negatives))
+        self.queue = nn.functional.normalize(self.queue, dim=0)
+        self.register_buffer("queue_ptr", torch.zeros(1, dtype=torch.long))
+
+    def forward(self, imgs):
+        return self.encoder_q(imgs)
+
+    def training_step(self, batch, batch_idx):
+        output, target = self.contrastive_step(*batch)
+        loss = F.cross_entropy(output.float(), target.long())
+
+        acc1, acc5 = precision_at_k(output, target, top_k=(1, 5))
+
+        log = {"train_loss": loss, "train_acc1": acc1, "train_acc5": acc5}
+        self.log_dict(log)
+        return loss
+
+    def validation_step(self, batch, batch_idx):
+        output, target = self.contrastive_step(*batch)
+        loss = F.cross_entropy(output.float(), target.long())
+
+        acc1, acc5 = precision_at_k(output, target, top_k=(1, 5))
+
+        results = {"val_loss": loss, "val_acc1": acc1, "val_acc5": acc5}
+        return results
+
+    def validation_epoch_end(self, outputs):
+        val_loss = mean(outputs, "val_loss")
+        val_acc1 = mean(outputs, "val_acc1")
+        val_acc5 = mean(outputs, "val_acc5")
+
+        log = {"val_loss": val_loss, "val_acc1": val_acc1, "val_acc5": val_acc5}
+        self.log_dict(log)
+
+    def contrastive_step(self, img_q, img_k):
+        """ Assumes we are training on single GPU
+        Input:
+            im_q: a batch of query images
+            im_k: a batch of key images
+        Output:
+            logits, targets
+        """
+
+        # Compute query features
+        q = self.encoder_q(img_q)  # queries: NxC
+        q = self.enc_q_fc(q)
+        q = nn.functional.normalize(q, dim=1)
+
+        # Compute key features
+        with torch.no_grad():
+            self._momentum_update_key_encoder()
+            k = self.encoder_k(img_k)
+            k = self.enc_k_fc(k)
+            k = nn.functional.normalize(k, dim=1)
+
+        # Compute logits
+        # positive logits: Nx1
+        # negative logits: NxK
+        l_pos = torch.einsum('nc,nc->n', [q, k]).unsqueeze(-1)
+        l_neg = torch.einsum('nc,ck->nk', [q, self.queue.clone().detach()])
+
+        # logits: Nx(1+K)
+        logits = torch.cat([l_pos, l_neg], dim=1)
+
+        # Apply temperature
+        logits /= self.temp
+
+        # labels: positive key indicators
+        labels = torch.zeros(logits.shape[0], dtype=torch.long)
+        labels = labels.type_as(logits)
+
+        self._dequeue_and_enqueue(k)
+
+        return logits, labels
+
+    @torch.no_grad()
+    def _momentum_update_key_encoder(self):
+        em = self.momentum
+        for param_q, param_k in zip(self.encoder_q.parameters(), self.encoder_k.parameters()):
+            param_k.data = param_k.data * em + param_q.data * (1. - em)
+
+    @torch.no_grad()
+    def _dequeue_and_enqueue(self, keys):
+        batch_size = keys.shape[0]
+
+        ptr = int(self.queue_ptr)
+        assert self.dict_size % batch_size == 0  # for simplicity
+
+        # replace the keys at ptr (dequeue and enqueue)
+        self.queue[:, ptr:ptr + batch_size] = keys.T
+        ptr = (ptr + batch_size) % self.dict_size  # move pointer
+
+        self.queue_ptr[0] = ptr
 
 
 # ************************************************************************************************
