@@ -10,8 +10,8 @@ from pytorch_lightning.callbacks import LearningRateMonitor, ModelCheckpoint
 import moltrans.util as util
 from moltrans.tokeniser import Tokeniser
 from moltrans.sampler import DecodeSampler
-from moltrans.data import BMSDataset, BMSDataModule
-from moltrans.model import BMSEncoder, BMSDecoder, BMSModel
+from moltrans.data import BMSTestDataset, BMSImgDataModule
+from moltrans.model import MoCoEncoder
 
 
 RANDOM_SEED = 42069
@@ -41,14 +41,14 @@ def split_dataset(dataset, split, train_transform=None, val_transform=None):
     num_val = round(split * len(dataset))
 
     val_idxs = random.sample(range(len(dataset)), num_val)
+    val_img_ids = [dataset.img_ids[idx] for idx in val_idxs]
     val_img_paths = [dataset.img_paths[idx] for idx in val_idxs]
-    val_inchis = [dataset.inchis[idx] for idx in val_idxs]
-    val_dataset = BMSDataset(val_img_paths, val_inchis, transform=val_transform)
+    val_dataset = BMSTestDataset(val_img_ids, val_img_paths, transform=val_transform)
 
     train_idxs = list(set(range(len(dataset))) - set(val_idxs))
+    train_img_ids = [dataset.img_ids[idx] for idx in train_idxs]
     train_img_paths = [dataset.img_paths[idx] for idx in train_idxs]
-    train_inchis = [dataset.inchis[idx] for idx in train_idxs]
-    train_dataset = BMSDataset(train_img_paths, train_inchis, transform=train_transform)
+    train_dataset = BMSTestDataset(train_img_ids, train_img_paths, transform=train_transform)
 
     return train_dataset, val_dataset
 
@@ -58,21 +58,17 @@ def build_model(args, dm, sampler, vocab_size):
         "acc_batches": args.acc_batches
     }
     train_steps = util.calc_train_steps(dm, args.epochs, args.acc_batches)
-    encoder = BMSEncoder(args.d_model, args.d_feedforward, args.num_layers, args.num_heads, args.max_seq_len)
-    decoder = BMSDecoder(args.d_model, args.d_feedforward, args.num_layers, args.num_heads)
-    model = BMSModel(
-        encoder,
-        decoder,
+    model = MoCoEncoder(
         args.d_model,
-        sampler,
+        args.d_feedforward,
+        args.num_layers,
+        args.num_heads,
         args.lr,
-        vocab_size,
         args.max_seq_len,
         args.schedule,
         train_steps,
         args.weight_decay,
-        args.warm_up_steps,
-        **extra_args
+        args.warm_up_steps
     )
     return model
 
@@ -80,7 +76,7 @@ def build_model(args, dm, sampler, vocab_size):
 def build_trainer(args):
     precision = 16 if torch.cuda.is_available() else 32
     gpus = 1 if torch.cuda.is_available() else 0
-    logger = TensorBoardLogger(LOG_DIR, name="bms-mol")
+    logger = TensorBoardLogger(LOG_DIR, name="bms-encoder")
     lr_monitor = LearningRateMonitor(logging_interval="step")
     checkpoint_cb = ModelCheckpoint(monitor="val_lev_dist", save_last=True)
     callbacks = [lr_monitor, checkpoint_cb]
@@ -105,7 +101,7 @@ def main(args):
 
     # Load dataset
     print("Loading dataset...")
-    dataset = BMSDataset.from_data_path(args.data_path)
+    dataset = BMSTestDataset.from_data_path(args.data_path)
     print("Dataset complete.")
 
     # Build tokeniser and sampler
@@ -126,7 +122,7 @@ def main(args):
 
     # Build data module
     print("Loading data module...")
-    dm = BMSDataModule(train_dataset, val_dataset, None, args.batch_size, tokeniser)
+    dm = BMSImgDataModule(train_dataset, val_dataset, args.batch_size, tokeniser)
     print("Data module complete.")
 
     # Build model

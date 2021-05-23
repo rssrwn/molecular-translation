@@ -182,3 +182,37 @@ class BMSDataModule(pl.LightningDataModule):
         aug_mol = Chem.RenumberAtoms(mol, atom_order)
         return aug_mol
 
+
+class BMSImgDataModule(pl.LightningDataModule):
+    def __init__(self, train_dataset, val_dataset, batch_size, tokeniser, pin_memory=True):
+        super().__init__()
+        self.train_dataset = train_dataset
+        self.val_dataset = val_dataset
+        self.batch_size = batch_size
+        self.tokeniser = tokeniser
+        self.pin_memory = pin_memory
+        self._num_workers = len(os.sched_getaffinity(0))
+
+    def train_dataloader(self):
+        loader = DataLoader(
+            self.train_dataset, 
+            batch_size=self.batch_size,
+            num_workers=self._num_workers, 
+            collate_fn=self._collate,
+            shuffle=True,
+            pin_memory=self.pin_memory
+        )
+        return loader
+
+    def val_dataloader(self):
+        loader = DataLoader(
+            self.val_dataset, 
+            batch_size=self.batch_size,
+            num_workers=self._num_workers, 
+            collate_fn=partial(self._collate, train=False),
+            pin_memory=self.pin_memory
+        )
+        return loader
+
+    def _collate(self, batch, train=True):
+        pass
