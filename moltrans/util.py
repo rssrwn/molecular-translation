@@ -53,9 +53,9 @@ IMG_MEAN = 0.9871
 IMG_STD_DEV = 0.08968
 WHITE = 255
 
-# PAD_PROB = 0.5
-# PAD_RANGE = (10, 50)
-# ROTATION_RANGE = (-180, 180)
+PAD_PROB = 0.5
+PAD_RANGE = (10, 50)
+ROTATION_RANGE = (-180, 180)
 
 SIGMA_1 = 0.3
 SIGMA_2 = 1.0
@@ -70,6 +70,17 @@ TRAIN_TRANSFORM = T.Compose([
 
 TEST_TRANSFORM = T.Compose([
     Squarify(),
+    T.Resize(IMG_SIZE),
+    T.ToTensor(),
+    BlurExtraChannels(SIGMA_1, SIGMA_2),
+    T.Normalize(IMG_MEAN, IMG_STD_DEV)
+])
+
+PRE_TRAIN_ENC_TRANSFORM = T.Compose([
+    Squarify(),
+    T.Resize(IMG_SIZE),
+    RandomPad(PAD_PROB, PAD_RANGE),
+    T.RandomRotation(ROTATION_RANGE),
     T.Resize(IMG_SIZE),
     T.ToTensor(),
     BlurExtraChannels(SIGMA_1, SIGMA_2),

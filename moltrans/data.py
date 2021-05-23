@@ -184,12 +184,13 @@ class BMSDataModule(pl.LightningDataModule):
 
 
 class BMSImgDataModule(pl.LightningDataModule):
-    def __init__(self, train_dataset, val_dataset, batch_size, tokeniser, pin_memory=True):
+    def __init__(self, train_dataset, val_dataset, batch_size, tokeniser, transform, pin_memory=True):
         super().__init__()
         self.train_dataset = train_dataset
         self.val_dataset = val_dataset
         self.batch_size = batch_size
         self.tokeniser = tokeniser
+        self.transform = transform
         self.pin_memory = pin_memory
         self._num_workers = len(os.sched_getaffinity(0))
 
@@ -215,4 +216,9 @@ class BMSImgDataModule(pl.LightningDataModule):
         return loader
 
     def _collate(self, batch, train=True):
-        pass
+        _, imgs = tuple(zip(*batch))
+        imgs1 = [self.transform(img) for img in imgs]
+        imgs2 = [self.transform(img) for img in imgs]
+        imgs1 = torch.stack(imgs1)
+        imgs2 = torch.stack(imgs2)
+        return (imgs1, imgs2)

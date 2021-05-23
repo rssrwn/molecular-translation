@@ -68,7 +68,8 @@ def build_model(args, dm, sampler, vocab_size):
         args.schedule,
         train_steps,
         args.weight_decay,
-        args.warm_up_steps
+        args.warm_up_steps,
+        **extra_args
     )
     return model
 
@@ -112,17 +113,12 @@ def main(args):
 
     # Split dataset randomly
     print("Spliting dataset...")
-    train_dataset, val_dataset = split_dataset(
-        dataset,
-        VAL_SPLIT,
-        train_transform=util.TRAIN_TRANSFORM,
-        val_transform=util.TEST_TRANSFORM
-    )
+    train_dataset, val_dataset = split_dataset(dataset, VAL_SPLIT)
     print("Complete.")
 
     # Build data module
     print("Loading data module...")
-    dm = BMSImgDataModule(train_dataset, val_dataset, args.batch_size, tokeniser)
+    dm = BMSImgDataModule(train_dataset, val_dataset, args.batch_size, tokeniser, util.PRE_TRAIN_ENC_TRANSFORM)
     print("Data module complete.")
 
     # Build model

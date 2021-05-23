@@ -304,7 +304,8 @@ class MoCoEncoder(_AbsTransformerModel):
         feat_dim=128,
         dict_size=4096,
         momentum=0.999,
-        temp=0.07
+        temp=0.07,
+        **kwargs
     ):
         super().__init__(
             d_model,
@@ -323,7 +324,8 @@ class MoCoEncoder(_AbsTransformerModel):
             feat_dim=feat_dim,
             dict_size=dict_size,
             momentum=momentum,
-            temp=temp
+            temp=temp,
+            **kwargs
         )
 
         self.feat_dim = feat_dim
@@ -331,21 +333,11 @@ class MoCoEncoder(_AbsTransformerModel):
         self.momentum = momentum
         self.temp = temp
 
-        self.encoder_q = BMSEncoder(d_model, d_feedforward, num_layers, num_heads, dropout, activation)
-        self.encoder_k = BMSEncoder(d_model, d_feedforward, num_layers, num_heads, dropout, activation)
+        self.encoder_q = BMSEncoder(d_model, d_feedforward, num_layers, num_heads, max_seq_len, dropout, activation)
+        self.encoder_k = BMSEncoder(d_model, d_feedforward, num_layers, num_heads, max_seq_len, dropout, activation)
 
-        self.enc_q_fc = nn.Sequential(
-            nn.AdaptiveAvgPool2d((1, 1)),
-            nn.Linear(d_model, d_model),
-            nn.ReLU(),
-            nn.Linear(d_model, feat_dim)
-        )
-        self.enc_k_fc = nn.Sequential(
-            nn.AdaptiveAvgPool2d((1, 1)),
-            nn.Linear(d_model, d_model),
-            nn.ReLU(),
-            nn.Linear(d_model, feat_dim)
-        )
+        self.enc_q_fc = nn.Sequential(nn.Linear(d_model, d_model), nn.ReLU(), nn.Linear(d_model, feat_dim))
+        self.enc_k_fc = nn.Sequential(nn.Linear(d_model, d_model), nn.ReLU(), nn.Linear(d_model, feat_dim))
 
         # Set same params and no grad for key encoder
         for param_q, param_k in zip(self.encoder_q.parameters(), self.encoder_k.parameters()):
@@ -353,7 +345,7 @@ class MoCoEncoder(_AbsTransformerModel):
             param_k.requires_grad = False
 
         # Create the queue
-        self.register_buffer("queue", torch.randn(emb_dim, num_negatives))
+        self.register_buffer("queue", torch.randn(feat_dim, dict_size))
         self.queue = nn.functional.normalize(self.queue, dim=0)
         self.register_buffer("queue_ptr", torch.zeros(1, dtype=torch.long))
 
@@ -399,14 +391,14 @@ class MoCoEncoder(_AbsTransformerModel):
         """
 
         # Compute query features
-        q = self.encoder_q(img_q)  # queries: NxC
+        q = self.encoder_q(img_q).mean(dim=0)  # queries: NxC
         q = self.enc_q_fc(q)
         q = nn.functional.normalize(q, dim=1)
 
         # Compute key features
         with torch.no_grad():
             self._momentum_update_key_encoder()
-            k = self.encoder_k(img_k)
+            k = self.encoder_k(img_k).mean(dim=0)
             k = self.enc_k_fc(k)
             k = nn.functional.normalize(k, dim=1)
 
