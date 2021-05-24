@@ -201,7 +201,8 @@ class BMSImgDataModule(pl.LightningDataModule):
             num_workers=self._num_workers, 
             collate_fn=self._collate,
             shuffle=True,
-            pin_memory=self.pin_memory
+            pin_memory=self.pin_memory,
+            drop_last=True
         )
         return loader
 
@@ -211,7 +212,8 @@ class BMSImgDataModule(pl.LightningDataModule):
             batch_size=self.batch_size,
             num_workers=self._num_workers, 
             collate_fn=partial(self._collate, train=False),
-            pin_memory=self.pin_memory
+            pin_memory=self.pin_memory,
+            drop_last=True
         )
         return loader
 
