@@ -96,6 +96,32 @@ class BMSTestDataset(BMSDataset):
         return img_id, img
 
 
+class BMSExtraMolDataset(Dataset):
+    def __init__(self, inchis):
+        self.inchis = inchis
+
+    @staticmethod
+    def from_data_path(data_path):
+        csv_path = Path(data_path) / "extra_approved_InChIs.csv"
+        df = pd.read_csv(csv_path)
+        inchis = df["InChI"].tolist()
+        dataset = BMSExtraMolDataset(inchis)
+        return dataset
+
+    def __len__(self):
+        return len(self.inchis)
+
+    def __getitem__(self, item):
+        inchi = self.inchis[item]
+        mol = Chem.inchi.MolFromInchi(inchi)
+        return mol
+
+
+# ******************************************************************************************
+# ************************************** Data Modules **************************************
+# ******************************************************************************************
+
+
 class BMSDataModule(pl.LightningDataModule):
     def __init__(
         self,
@@ -224,3 +250,78 @@ class BMSImgDataModule(pl.LightningDataModule):
         imgs1 = torch.stack(imgs1)
         imgs2 = torch.stack(imgs2)
         return (imgs1, imgs2)
+
+
+class BMSSmilesDataModule(pl.LightningDataModule):
+    def __init__(self, train_dataset, val_dataset, batch_size, tokeniser, pin_memory=True):
+        super().__init__()
+        self.train_dataset = train_dataset
+        self.val_dataset = val_dataset
+        self.batch_size = batch_size
+        self.tokeniser = tokeniser
+        self.pin_memory = pin_memory
+        self._num_workers = len(os.sched_getaffinity(0))
+
+    def train_dataloader(self):
+        loader = DataLoader(
+            self.train_dataset, 
+            batch_size=self.batch_size,
+            num_workers=self._num_workers, 
+            collate_fn=self._collate,
+            shuffle=True,
+            pin_memory=self.pin_memory,
+            drop_last=True
+        )
+        return loader
+
+    def val_dataloader(self):
+        loader = DataLoader(
+            self.val_dataset, 
+            batch_size=self.batch_size,
+            num_workers=self._num_workers, 
+            collate_fn=partial(self._collate, train=False),
+            pin_memory=self.pin_memory,
+            drop_last=True
+        )
+        return loader
+
+    def _collate(self, batch, train=True):
+        # Create encoder input
+        mols = [self._augment_mol(mol) for mol in batch]
+        mol_strs = [Chem.MolToSmiles(mol, canonical=False) for mol in mols]
+
+        token_output = self.tokeniser.tokenise(mol_strs, pad=True, mask=True)
+        enc_tokens = token_output["masked_tokens"]
+        enc_pad_masks = token_output["masked_pad_masks"]
+
+        enc_token_ids = self.tokeniser.convert_tokens_to_ids(enc_tokens)
+        enc_token_ids = torch.tensor(enc_token_ids).transpose(0, 1)
+        enc_pad_masks = torch.tensor(enc_pad_masks, dtype=torch.bool).transpose(0, 1)
+
+        # Create decoder input
+        aug_mols = [self._augment_mol(mol) for mol in mols]
+        aug_mol_strs = [Chem.MolToSmiles(mol, canonical=False) for mol in aug_mols]
+
+        token_output = self.tokeniser.tokenise(aug_mol_strs, pad=True)
+        dec_tokens = token_output["original_tokens"]
+        dec_pad_masks = token_output["original_pad_masks"]
+
+        dec_token_ids = self.tokeniser.convert_tokens_to_ids(dec_tokens)
+        dec_token_ids = torch.tensor(dec_token_ids).transpose(0, 1)
+        dec_pad_masks = torch.tensor(dec_pad_masks, dtype=torch.bool).transpose(0, 1)
+
+        collate_output = {
+            "encoder_input": enc_token_ids,
+            "encoder_pad_mask": enc_pad_masks,
+            "decoder_input": dec_token_ids[:-1, :],
+            "decoder_pad_mask": dec_pad_masks[:-1, :],
+            "target": dec_token_ids.clone()[1:, :],
+            "target_mask": dec_pad_masks.clone()[1:, :]
+        }
+        return collate_output
+
+    def _augment_mol(self, mol):
+        atom_order = list(range(mol.GetNumAtoms()))
+        np.random.shuffle(atom_order)
+        aug_mol = Chem.RenumberAtoms(mol, atom_order)
+        return aug_mol
