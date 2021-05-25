@@ -527,7 +527,7 @@ class BARTModel(_AbsTransformerModel):
         decoder_embs = self._construct_input(decoder_input)
         model_output = self.decoder(decoder_embs, decoder_pad_mask, memory)
         token_output = self.token_fc(model_output)
-        return token_probs
+        return token_output
 
     def _calc_loss(self, batch_input, model_output):
         target = batch_input["target"]
