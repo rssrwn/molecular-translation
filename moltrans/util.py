@@ -60,6 +60,9 @@ ROTATION_RANGE = (-180, 180)
 SIGMA_1 = 0.3
 SIGMA_2 = 1.0
 
+ERASE_PROB = 0.5
+ERASE_AREA_SCALE = (0.02, 0.1)
+
 TRAIN_TRANSFORM = T.Compose([
     Squarify(),
     T.Resize(IMG_SIZE),
@@ -84,7 +87,8 @@ PRE_TRAIN_ENC_TRANSFORM = T.Compose([
     T.Resize(IMG_SIZE),
     T.ToTensor(),
     BlurExtraChannels(SIGMA_1, SIGMA_2),
-    T.Normalize(IMG_MEAN, IMG_STD_DEV)
+    T.Normalize(IMG_MEAN, IMG_STD_DEV),
+    T.RandomErasing(p=ERASE_PROB, scale=ERASE_AREA_SCALE)
 ])
 
 

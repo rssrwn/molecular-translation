@@ -79,7 +79,7 @@ def build_trainer(args):
     gpus = 1 if torch.cuda.is_available() else 0
     logger = TensorBoardLogger(LOG_DIR, name="bms-encoder")
     lr_monitor = LearningRateMonitor(logging_interval="step")
-    checkpoint_cb = ModelCheckpoint(monitor="val_acc1", save_last=True)
+    checkpoint_cb = ModelCheckpoint(monitor="val_acc1", mode="max", save_last=True)
     callbacks = [lr_monitor, checkpoint_cb]
 
     print(f"Using precision: {precision}-bit")
