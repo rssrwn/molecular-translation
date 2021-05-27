@@ -478,10 +478,12 @@ class BARTModel(_AbsTransformerModel):
         schedule,
         num_steps,
         weight_decay,
+        vocab_size,
         warm_up_steps=None,
         pad_token_idx=0,
         dropout=0.1,
-        activation="gelu"
+        activation="gelu",
+        **kwargs
     ):
         super().__init__(
             d_model,
@@ -496,7 +498,8 @@ class BARTModel(_AbsTransformerModel):
             dropout=dropout,
             d_feedforward=d_feedforward,
             num_layers=num_layers,
-            num_heads=num_heads
+            num_heads=num_heads,
+            **kwargs
         )
 
         enc_norm = nn.LayerNorm(d_model)
@@ -524,8 +527,8 @@ class BARTModel(_AbsTransformerModel):
         return model_output
 
     def decode(self, dec_input, dec_pad_mask, memory):
-        decoder_embs = self._construct_input(decoder_input)
-        model_output = self.decoder(decoder_embs, decoder_pad_mask, memory)
+        decoder_embs = self._construct_input(dec_input)
+        model_output = self.decoder(decoder_embs, dec_pad_mask, memory)
         token_output = self.token_fc(model_output)
         return token_output
 

@@ -34,7 +34,7 @@ DEFAULT_NUM_LAYERS = 6
 DEFAULT_SCHEDULE = "cycle"
 DEFAULT_LR = 0.001
 DEFAULT_WEIGHT_DECAY = 0.0
-DEFAULT_WARM_UP_STEPS = 4000
+DEFAULT_WARM_UP_STEPS = 8000
 
 
 def split_dataset(dataset, split):
@@ -66,6 +66,7 @@ def build_model(args, dm, sampler, vocab_size):
         args.schedule,
         train_steps,
         args.weight_decay,
+        vocab_size,
         args.warm_up_steps,
         **extra_args
     )
