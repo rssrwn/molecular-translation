@@ -34,7 +34,7 @@ DEFAULT_NUM_LAYERS = 6
 DEFAULT_SCHEDULE = "cycle"
 DEFAULT_LR = 0.001
 DEFAULT_WEIGHT_DECAY = 0.0
-DEFAULT_WARM_UP_STEPS = 4000
+DEFAULT_WARM_UP_STEPS = 8000
 
 
 def split_dataset(dataset, split, train_transform=None, val_transform=None):
