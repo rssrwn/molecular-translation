@@ -179,10 +179,20 @@ class BMSDataModule(pl.LightningDataModule):
 
     def _collate(self, batch, train=True):
         imgs, mols = tuple(zip(*batch))
-        if self.aug_mols and train:
-            mols = [self._augment_mol(mol) for mol in mols]
 
-        mol_strs = [Chem.MolToSmiles(mol, canonical=False) for mol in mols]
+        aug_mols = mols
+        if self.aug_mols and train:
+            aug_mols = [self._augment_mol(mol) for mol in mols]
+
+        mol_strs = []
+        for aug_mol, mol in zip(aug_mols, mols):
+            try:
+                mol_str = Chem.MolToSmiles(aug_mol, canonical=False)
+            except RuntimeError:
+                mol_str = Chem.MolToSmiles(mol, canonical=False)
+
+            mol_strs.append(mol_str)
+
         token_output = self.tokeniser.tokenise(mol_strs, pad=True)
         tokens = token_output["original_tokens"]
         pad_masks = token_output["original_pad_masks"]

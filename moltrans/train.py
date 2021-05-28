@@ -11,7 +11,7 @@ import moltrans.util as util
 from moltrans.tokeniser import Tokeniser
 from moltrans.sampler import DecodeSampler
 from moltrans.data import BMSDataset, BMSDataModule
-from moltrans.model import BMSEncoder, BMSDecoder, BMSModel
+from moltrans.model import MoCoEncoder, BARTModel, BMSModel
 
 
 RANDOM_SEED = 42069
@@ -35,6 +35,8 @@ DEFAULT_SCHEDULE = "cycle"
 DEFAULT_LR = 0.001
 DEFAULT_WEIGHT_DECAY = 0.0
 DEFAULT_WARM_UP_STEPS = 8000
+DEFAULT_ENC_PATH = "tb_logs/bms-encoder/version_1/checkpoints/last.ckpt"
+DEFAULT_DEC_PATH = "tb_logs/bms-decoder/version_0/checkpoints/last.ckpt"
 
 
 def split_dataset(dataset, split, train_transform=None, val_transform=None):
@@ -58,8 +60,19 @@ def build_model(args, dm, sampler, vocab_size):
         "acc_batches": args.acc_batches
     }
     train_steps = util.calc_train_steps(dm, args.epochs, args.acc_batches)
-    encoder = BMSEncoder(args.d_model, args.d_feedforward, args.num_layers, args.num_heads, args.max_seq_len)
-    decoder = BMSDecoder(args.d_model, args.d_feedforward, args.num_layers, args.num_heads)
+
+    # Load encoder
+    encoder = MoCoEncoder.load_from_checkpoint(args.encoder_path)
+    encoder.encoder_k = None
+    encoder.enc_k_fc = None
+    encoder.queue = None
+    encoder.queue_ptr = None
+
+    # Load decoder
+    decoder = BARTModel.load_from_checkpoint(args.decoder_path)
+    decoder.encoder = None
+
+    # Build model
     model = BMSModel(
         encoder,
         decoder,
@@ -152,6 +165,8 @@ if __name__ == "__main__":
     parser.add_argument("--data_path", type=str)
     parser.add_argument("--vocab_path", type=str, default=DEFAULT_VOCAB_PATH)
     parser.add_argument("--max_seq_len", type=int, default=DEFAULT_MAX_SEQ_LEN)
+    parser.add_argument("--encoder_path", type=str, default=DEFAULT_ENC_PATH)
+    parser.add_argument("--decoder_path", type=str, default=DEFAULT_DEC_PATH)
 
     # Model and training args
     parser.add_argument("--batch_size", type=int, default=DEFAULT_BATCH_SIZE)

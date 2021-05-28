@@ -595,8 +595,7 @@ class BMSModel(_AbsTransformerModel):
         self.val_sampling_alg = "greedy"
         self.num_beams = 5
 
-        self.emb = nn.Embedding(vocab_size, d_model, padding_idx=pad_token_idx)
-        self.token_fc = nn.Linear(d_model, vocab_size)
+        self.connector_fc = nn.Linear(d_model, d_model)
         self.loss_fn = nn.CrossEntropyLoss(reduction="none", ignore_index=pad_token_idx)
         self.log_softmax = nn.LogSoftmax(dim=2)
 
@@ -607,11 +606,9 @@ class BMSModel(_AbsTransformerModel):
         decoder_input = x["decoder_input"]
         decoder_pad_mask = x["decoder_pad_mask"].transpose(0 ,1)
 
-        memory = self.encoder(imgs)
-        decoder_embs = self._construct_dec_input(decoder_input)
-        model_output = self.decoder(decoder_embs, decoder_pad_mask, memory)
-
-        token_output = self.token_fc(model_output)
+        memory = self.encoder.encode(imgs)
+        memory = self.connector_fc(memory)
+        token_output = self.decoder.decode(decoder_input, decoder_pad_mask, memory)
         return token_output
 
     def _calc_loss(self, batch_input, model_output):
@@ -680,8 +677,10 @@ class BMSModel(_AbsTransformerModel):
 
     def sample_molecules(self, batch_input, sampling_alg="greedy"):
         self.freeze()
+
         imgs = batch_input["images"]
-        memory = self.encoder(imgs)
+        memory = self.encoder.encode(imgs)
+        memory = self.connector_fc(memory)
 
         _, batch_size, _ = tuple(memory.size())
         decode_fn = partial(self._decode_fn, memory=memory)
@@ -697,17 +696,9 @@ class BMSModel(_AbsTransformerModel):
         return mol_strs, log_lhs
 
     def _decode_fn(self, dec_input, dec_pad_mask, memory):
-        decoder_embs = self._construct_dec_input(dec_input)
-        dec_mask = dec_pad_mask.transpose(0, 1)
-        output = self.decoder(decoder_embs, dec_mask, memory)
-        token_output = self.token_fc(output)
+        token_output = self.decoder.decode(dec_input, dec_pad_mask.transpose(0, 1), memory)
         token_probs = self.log_softmax(token_output)
         return token_probs
-
-    def _construct_dec_input(self, token_ids):
-        token_embs = self.emb(token_ids) * math.sqrt(self.d_model)
-        embs = self._add_pos_embs(token_embs)
-        return embs
 
     def _calc_token_acc(self, batch_input, model_output):
         token_ids = batch_input["target"]
